@@ -1,0 +1,51 @@
+from pyspark.sql.functions import *
+import pandas as pd
+from pyspark import HiveContext
+from pyspark.sql.functions import rank
+from pyspark.sql import Row, functions as F
+from pyspark.sql.window import Window
+from pyspark.sql.functions import row_number
+
+##Create RFM Table
+rfmTable = recharge.groupby('vopenid') \
+.agg(max(recharge.trans_date).alias('recent_purchase'),count(recharge.ftran_time).alias('frequency'),sum(recharge.total_nap).alias('monetary'))
+
+rfmTable= rfmTable.withColumn("current_date",current_date())
+rfmTable = rfmTable.select('vopenid',datediff(rfmTable.current_date,rfmTable.recent_purchase).alias('recency'),'frequency','monetary')
+
+quantiles = rfmTable_panda.quantile(q=[0.25,0.5,0.75])
+quantiles = quantiles.to_dict()
+rfmSegmentation = rfmTable_panda
+
+# Arguments (x = value, p = recency, monetary_value, frequency, k = quartiles dict)
+def RClass(x,p,d):
+    if x <= d[p][0.25]:
+        return 1
+    elif x <= d[p][0.50]:
+        return 2
+    elif x <= d[p][0.75]: 
+        return 3
+    else:
+        return 4
+    
+# Arguments (x = value, p = recency, monetary_value, frequency, k = quartiles dict)
+def FMClass(x,p,d):
+    if x <= d[p][0.25]:
+        return 4
+    elif x <= d[p][0.50]:
+        return 3
+    elif x <= d[p][0.75]: 
+        return 2
+    else:
+        return 1
+
+rfmSegmentation['R_Quartile'] = rfmSegmentation['recency'].apply(RClass, args=('recency',quantiles,))
+rfmSegmentation['F_Quartile'] = rfmSegmentation['frequency'].apply(FMClass, args=('frequency',quantiles,))
+rfmSegmentation['M_Quartile'] = rfmSegmentation['monetary'].apply(FMClass, args=('monetary',quantiles,))
+
+rfmSegmentation['RFMClass'] = rfmSegmentation.R_Quartile.map(str) \
+                            + rfmSegmentation.F_Quartile.map(str) \
+                            + rfmSegmentation.M_Quartile.map(str)
+                            
+rfmSegmentation= spark.createDataFrame(rfmSegmentation)
+
